@@ -33,27 +33,37 @@ class VectorStoreManager:
 
     def initialize(self) -> VectorStore:
         """初始化向量存储：加载文档、切分、增强、存入 ChromaDB"""
-        # 1. 加载文档
+        # 先尝试加载已有 ChromaDB，避免重复添加
+        try:
+            existing = Chroma(
+                embedding_function=self._embedding_function,
+                persist_directory=self._persist_directory,
+            )
+            if existing._collection.count() > 0:
+                self._vector_store = existing
+                logger.info("加载已有知识库: %d 篇文档", existing._collection.count())
+                return self._vector_store
+        except Exception:
+            pass
+
+        # 首次初始化：加载文档、切分、增强、存入 ChromaDB
         loader = DocumentLoader()
         documents = loader.load_documents()
 
-        # 2. 切分文档
         splitter = TextSplitter()
         split_docs = splitter.split_customized(documents)
 
-        # 3. 关键词增强
         if self._llm:
             enricher = KeywordEnricher(self._llm)
             split_docs = enricher.enrich_documents(split_docs)
 
-        # 4. 存入 ChromaDB
         self._vector_store = Chroma.from_documents(
             documents=split_docs,
             embedding=self._embedding_function,
             persist_directory=self._persist_directory,
         )
         logger.info(
-            "向量存储初始化完成: %d 个文档, 存储位置: %s",
+            "知识库初始化完成: %d 篇文档 → %s",
             len(split_docs),
             self._persist_directory,
         )

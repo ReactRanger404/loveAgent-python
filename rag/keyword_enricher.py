@@ -4,6 +4,7 @@ from typing import Optional
 
 from langchain_core.documents import Document
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import HumanMessage
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ class KeywordEnricher:
                         f"从以下文本中提取 {keywords_count} 个最关键的关键词，"
                         f"用逗号分隔返回。\n\n文本：{doc.page_content[:500]}"
                     )
-                    response = self._llm.invoke(prompt)
+                    response = self._llm.invoke([HumanMessage(content=prompt)])
                     keywords = response.content.strip() if hasattr(response, 'content') else str(response).strip()
                     doc.metadata["keywords"] = keywords
                 except Exception as e:

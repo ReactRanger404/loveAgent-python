@@ -25,7 +25,6 @@ class TextSplitter:
         splitter = TokenTextSplitter(
             chunk_size=200,
             chunk_overlap=100,
-            length_function=len,
-            separators=["\n\n", "\n", " ", ""],
+            encoding_name="cl100k_base",
         )
         return splitter.split_documents(documents)

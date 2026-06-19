@@ -17,6 +17,7 @@ from tools.pdf_generation import pdf_generation_tool
 from tools.speech_recognition import speech_recognition_tool
 from tools.speech_synthesis import speech_synthesis_tool
 from tools.terminate import terminate_tool
+from tools.rag_query import rag_query_tool
 
 
 def get_all_tools(api_key: Optional[str] = None) -> list[BaseTool]:
@@ -34,6 +35,7 @@ def get_all_tools(api_key: Optional[str] = None) -> list[BaseTool]:
         pdf_generation_tool,
         speech_recognition_tool,
         speech_synthesis_tool,
+        rag_query_tool,
         terminate_tool,
     ]
 

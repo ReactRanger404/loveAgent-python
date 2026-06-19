@@ -1,8 +1,7 @@
 """抽象基础智能体 - 对应 Java 的 BaseAgent"""
-import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import AsyncGenerator
 
 from agents.agent_state import AgentState
 
@@ -14,6 +13,12 @@ class BaseAgent(ABC):
     抽象基础代理类，用于管理代理状态和执行流程。
     提供状态转换、记忆管理和基于步骤的执行循环的基础功能。
     对应 Java: BaseAgent.java
+
+    run_stream() 产出结构化事件（dict），包含 type 字段：
+      - type: "tool"    → 工具调用步骤（前端显示为小提示）
+      - type: "text"    → LLM 回答文本（前端流式渲染到聊天框）
+      - type: "error"   → 错误信息
+      - type: "file"    → 生成的文件（前端显示下载按钮）
     """
 
     def __init__(
@@ -29,21 +34,14 @@ class BaseAgent(ABC):
         self.state = AgentState.IDLE
         self.current_step = 0
         self.max_steps = max_steps
-        # 消息历史（替代 Java 的 messageList）
         self.messages: list[dict] = []
 
     def run(self, user_prompt: str) -> str:
-        """
-        运行智能体（同步方式）
-        对应 Java: run(String userPrompt)
-        """
-        # 1. 基础校验
         if self.state != AgentState.IDLE:
             raise RuntimeError(f"Cannot run agent from state: {self.state}")
         if not user_prompt or not user_prompt.strip():
             raise RuntimeError("Cannot run agent with empty user prompt")
 
-        # 2. 执行
         self.state = AgentState.RUNNING
         self.messages.append({"role": "user", "content": user_prompt})
         results = []
@@ -52,39 +50,31 @@ class BaseAgent(ABC):
             for i in range(self.max_steps):
                 if self.state == AgentState.FINISHED:
                     break
-                step_number = i + 1
-                self.current_step = step_number
-                logger.info("Executing step %d/%d", step_number, self.max_steps)
-                step_result = self.step()
-                result = f"Step {step_number}: {step_result}"
-                results.append(result)
+                self.current_step = i + 1
+                results.append(self.step())
 
             if self.current_step >= self.max_steps:
                 self.state = AgentState.FINISHED
-                results.append(f"Terminated: Reached max steps ({self.max_steps})")
-
             return "\n".join(results)
         except Exception as e:
             self.state = AgentState.ERROR
-            logger.error("Error executing agent step %d/%d", self.current_step, self.max_steps, exc_info=e)
+            logger.error("Error executing agent", exc_info=e)
             return f"执行错误: {e!s}"
         finally:
             self.cleanup()
 
-    async def run_stream(self, user_prompt: str):
+    async def run_stream(self, user_prompt: str) -> AsyncGenerator[dict, None]:
         """
-        运行智能体（流式输出）—— 异步生成器
-        对应 Java: runStream(String userPrompt) -> SseEmitter
+        流式运行，产出结构化事件。
+        子类（ToolAgent 等）重写此方法以发送更细粒度的事件。
         """
-        # 1. 基础校验
         if self.state != AgentState.IDLE:
-            yield f"错误：无法从状态运行代理：{self.state}"
+            yield {"type": "error", "content": f"无法从状态运行代理：{self.state}"}
             return
         if not user_prompt or not user_prompt.strip():
-            yield "错误：不能使用空提示词运行代理"
+            yield {"type": "error", "content": "不能使用空提示词运行代理"}
             return
 
-        # 2. 执行
         self.state = AgentState.RUNNING
         self.messages.append({"role": "user", "content": user_prompt})
 
@@ -92,28 +82,28 @@ class BaseAgent(ABC):
             for i in range(self.max_steps):
                 if self.state == AgentState.FINISHED:
                     break
-                step_number = i + 1
-                self.current_step = step_number
-                logger.info("Executing step %d/%d", step_number, self.max_steps)
-                step_result = self.step()
-                result = f"Step {step_number}: {step_result}"
-                yield result
+                self.current_step = i + 1
+                logger.info("Step %d/%d", self.current_step, self.max_steps)
+                result = self.step()
+                yield {"type": "text", "content": result}
 
             if self.current_step >= self.max_steps:
                 self.state = AgentState.FINISHED
-                yield f"执行结束：达到最大步骤（{self.max_steps}）"
         except Exception as e:
             self.state = AgentState.ERROR
             logger.error("Error executing agent", exc_info=e)
-            yield f"执行错误: {e!s}"
+            yield {"type": "error", "content": f"执行错误: {e!s}"}
         finally:
             self.cleanup()
 
+    def reset(self):
+        """重置状态以便接收新任务，保留对话历史"""
+        self.state = AgentState.IDLE
+        self.current_step = 0
+
     @abstractmethod
     def step(self) -> str:
-        """定义单个步骤，子类必须实现"""
         ...
 
     def cleanup(self):
-        """清理资源，子类可重写"""
         pass
