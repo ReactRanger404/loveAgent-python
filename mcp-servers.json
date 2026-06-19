@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "amap-maps": {
+      "command": "npx.cmd",
+      "args": [
+        "-y",
+        "@amap/amap-maps-mcp-server"
+      ],
+      "env": {
+        "AMAP_MAPS_API_KEY": "efec48c21522333bc75044afb1716bfd"
+      }
+    },
+    "python-image-search-mcp-server": {
+      "command": "python",
+      "args": [
+        "-m",
+        "mcp_servers.image_search_server"
+      ],
+      "env": {}
+    }
+  }
+}
