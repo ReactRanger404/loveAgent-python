@@ -19,6 +19,17 @@ export function doChat(message, signal, sessionId = '') {
 export { doChat as doChatWithManus }
 
 /**
+ * 删除后端指定会话的全部数据
+ * @param {string} sessionId
+ */
+export async function deleteHistoryBackend(sessionId) {
+  if (!sessionId) return
+  try {
+    await fetch(`${BASE_URL}/chat/history?session_id=${encodeURIComponent(sessionId)}`, { method: 'DELETE' })
+  } catch {}
+}
+
+/**
  * 从后端加载聊天历史记录（替代 localStorage）
  * @param {string} sessionId
  * @returns {Promise<Array>}

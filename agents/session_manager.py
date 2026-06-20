@@ -197,6 +197,16 @@ class SessionManager:
         except Exception as e:
             logger.warning("保存 UI 消息失败: %s", e)
 
+    async def delete_session(self, session_id: str):
+        """删除会话数据（内存 + 数据库）"""
+        self.remove_session(session_id)
+        if self._storage:
+            try:
+                await self._storage.delete(session_id)
+                logger.info("会话 %s 已从数据库删除", session_id)
+            except Exception as e:
+                logger.warning("删除数据库记录失败: %s", e)
+
     def remove_session(self, session_id: str):
         """清理会话（用户主动退出或超时）"""
         if session_id in self._sessions:

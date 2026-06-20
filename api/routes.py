@@ -92,6 +92,16 @@ def create_router(all_tools=None, llm=None):
             logger.error("保存历史记录失败: %s", e)
             return Response(content="fail", status_code=500)
 
+    @router.delete("/chat/history")
+    async def delete_chat_history(session_id: str = Query(...)):
+        """删除指定会话的全部数据"""
+        try:
+            await session_manager.delete_session(session_id)
+            return Response(content="ok")
+        except Exception as e:
+            logger.error("删除历史记录失败: %s", e)
+            return Response(content="fail", status_code=500)
+
     # ==================== 文件下载 ====================
 
     @router.get("/file/{file_path:path}")
