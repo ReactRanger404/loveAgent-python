@@ -9,6 +9,7 @@ FastAPI 路由 - 合并后的领域智能体
 import json
 import os
 import logging
+from urllib.parse import quote
 
 from fastapi import APIRouter, Query
 from fastapi.responses import Response
@@ -72,10 +73,16 @@ def create_router(all_tools=None, llm=None):
         full_path = os.path.join(FILE_SAVE_DIR, file_path)
         if not os.path.exists(full_path):
             return Response(content="文件不存在", status_code=404)
+
+        raw_filename = os.path.basename(file_path)
+        # 对中文文件名做 RFC 5987 编码，避免非 ASCII 字符导致响应头异常
+        encoded_filename = quote(raw_filename, encoding='utf-8')
+        disposition = f'inline; filename="{encoded_filename}"; filename*=UTF-8\'\'{encoded_filename}'
+
         content_type = "application/pdf" if file_path.endswith(".pdf") else "application/octet-stream"
         with open(full_path, "rb") as f:
             return Response(content=f.read(), media_type=content_type,
-                            headers={"Content-Disposition": f"inline; filename={os.path.basename(file_path)}"})
+                            headers={"Content-Disposition": disposition})
 
     # ==================== 语音合成 ====================
 
