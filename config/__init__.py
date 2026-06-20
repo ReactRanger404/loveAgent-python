@@ -26,10 +26,12 @@ class Settings(BaseSettings):
     server_port: int = 8123
     context_path: str = "/api"
 
-    # PostgreSQL（可选）
-    postgres_url: Optional[str] = None
-    postgres_user: Optional[str] = None
-    postgres_password: Optional[str] = None
+    # PostgreSQL（本地）
+    postgres_host: str = "127.0.0.1"
+    postgres_port: int = 5433
+    postgres_user: str = "my_user"
+    postgres_password: str = "20050828zxhH_"
+    postgres_db: str = "ai_agent"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
