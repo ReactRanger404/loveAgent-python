@@ -28,6 +28,14 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app_instance):
+        # 初始化会话持久化数据库
+        try:
+            from chat_memory.db_storage import SessionStorage
+            await SessionStorage.init()
+            logger.info("会话持久化: SQLite")
+        except Exception as e:
+            logger.warning("会话持久化初始化失败（不影响基本功能）: %s", e)
+
         logger.info("=" * 50)
         logger.info("领域智能体启动成功!")
         logger.info("地址: http://%s:%d%s", settings.server_host, settings.server_port, settings.context_path)

@@ -19,14 +19,12 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
 import ChatRoom from '../components/ChatRoom.vue'
 import { parseSseStream } from '../utils/sse.js'
+import { fetchHistory, saveHistory } from '../api/chat.js'
 
-const STORAGE_KEY_PREFIX = 'chat_messages_'
-const SESSION_KEY_PREFIX = 'chat_session_id_'
-
-// 每个浏览器第一次访问时生成唯一标识，后续复用，实现用户隔离
+// 浏览器唯一标识（仅存在 localStorage，无聊天内容）
 let userId = ''
 try {
   userId = localStorage.getItem('_uid')
@@ -35,8 +33,6 @@ try {
     localStorage.setItem('_uid', userId)
   }
 } catch {}
-const STORAGE_KEY = STORAGE_KEY_PREFIX + userId
-const SESSION_KEY = SESSION_KEY_PREFIX + userId
 
 const props = defineProps({
   title: { type: String, required: true },
@@ -45,38 +41,22 @@ const props = defineProps({
   chatFn: { type: Function, required: true },
 })
 
-// 从 localStorage 恢复历史消息和会话 ID（带异常保护）
-let initialMessages = []
-try {
-  const saved = localStorage.getItem(STORAGE_KEY)
-  if (saved) initialMessages = JSON.parse(saved)
-} catch (e) {
-  console.warn('读取历史消息失败，已重置:', e)
-  localStorage.removeItem(STORAGE_KEY)
-}
-const messages = ref(initialMessages)
-const loading = ref(false)
-
+// session_id 存在 localStorage（仅标识符，不含聊天内容）
 const savedSessionId = (() => {
-  try { return localStorage.getItem(SESSION_KEY) } catch { return null }
+  try { return localStorage.getItem('chat_session_id') } catch { return null }
 })()
 const sessionId = ref(savedSessionId || 'session_' + Math.random().toString(36).substring(2, 10))
-try { localStorage.setItem(SESSION_KEY, sessionId.value) } catch {}
+try { localStorage.setItem('chat_session_id', sessionId.value) } catch {}
 
-// 消息变化时自动持久化（防抖：仅保存完整消息，不保存流式中间态）
-let saveTimer = null
-watch(messages, () => {
-  if (saveTimer) clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => {
-    try {
-      // 只保存 user/assistant 的对话记录，跳过 think/tool 中间态
-      const history = messages.value.filter(m => m.role === 'user' || m.role === 'assistant')
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(history))
-    } catch (e) {
-      console.warn('保存历史消息失败:', e)
-    }
-  }, 500)
-}, { deep: true })
+// 消息从后端加载，不从 localStorage 读
+const messages = ref([])
+const loading = ref(false)
+
+// 组件挂载时从后端加载历史
+fetchHistory(sessionId.value).then(msgs => {
+  if (msgs.length) messages.value = msgs
+})
+
 let abortController = null
 
 async function handleSend(text) {
@@ -140,6 +120,8 @@ async function handleSend(text) {
   } finally {
     loading.value = false
     abortController = null
+    // 恢复后的旧消息 + 本次新消息一并保存到后端
+    saveHistory(sessionId.value, messages.value)
   }
 }
 

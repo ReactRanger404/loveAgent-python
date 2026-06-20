@@ -1,4 +1,4 @@
-"""会话管理器 — 滑动窗口记忆 + 摘要压缩 + 异步存储 + 状态机复用"""
+"""会话管理器 — 滑动窗口记忆 + 摘要压缩 + DB 持久化 + 状态机复用"""
 
 import asyncio
 import logging
@@ -6,6 +6,7 @@ from typing import Optional
 
 from agents.manus import Manus
 from agents.agent_state import AgentState
+from chat_memory.db_storage import SessionStorage
 
 logger = logging.getLogger(__name__)
 
@@ -44,20 +45,35 @@ class SessionManager:
     - 管理 agent 实例（复用而非每次新建）
     - 滑动窗口（只保留最近 MAX_ROUNDS 轮）
     - 摘要压缩（超出的轮次自动压缩）
-    - 异步存储（非阻塞持久化，为后续接入 DB 做准备）
+    - 异步持久化（SQLite，重启后可恢复 LLM 记忆）
     """
 
-    def __init__(self):
+    def __init__(self, persist: bool = True):
         self._sessions: dict[str, Session] = {}
+        self._storage = SessionStorage() if persist else None
 
-    def get_or_create(self, session_id: str, all_tools=None, llm=None) -> Session:
-        """获取或创建会话"""
+    async def get_or_create(self, session_id: str, all_tools=None, llm=None) -> Session:
+        """获取或创建会话（优先从持久化存储恢复）"""
         if session_id not in self._sessions:
             agent = Manus(available_tools=all_tools, llm=llm) if all_tools and llm else None
             if not agent:
                 raise RuntimeError("Agent 未初始化，请检查 LLM 和工具配置")
             self._sessions[session_id] = Session(session_id, agent)
             logger.info("创建新会话: %s", session_id)
+
+            # 尝试从持久化存储恢复
+            if self._storage:
+                try:
+                    saved = await self._storage.load(session_id)
+                    if saved:
+                        session = self._sessions[session_id]
+                        session.summary = saved.get("summary", "")
+                        if saved.get("messages"):
+                            session.agent.messages = saved["messages"]
+                        logger.info("会话 %s 已从数据库恢复 (%d 条消息)", session_id, len(saved.get("messages", [])))
+                except Exception as e:
+                    logger.warning("会话恢复失败（不影响使用）: %s", e)
+
         return self._sessions[session_id]
 
     def prepare_agent(self, session: Session) -> Manus:
@@ -139,27 +155,43 @@ class SessionManager:
             logger.warning("摘要生成失败（不影响对话）: %s", e)
 
     async def background_save(self, session: Session):
-        """
-        异步保存会话状态（当前为内存存储，埋好 DB 扩展点）
-        在企业环境中，这里会写入 PostgreSQL / Redis
-        """
+        """异步持久化会话（摘要 + 最近消息）到 SQLite"""
         try:
             # 等待正在进行的摘要任务完成
             if session._save_task:
                 await session._save_task
                 session._save_task = None
 
-            # 当前只是内存存储，所以实际无需 I/O
-            # 以下是未来扩展点：
-            # await db.execute(
-            #     "UPDATE sessions SET messages = $1, summary = $2 WHERE id = $3",
-            #     json.dumps(session.agent.messages),
-            #     session.summary,
-            #     session.session_id
-            # )
-            logger.debug("会话 %s 已持久化（内存模式）", session.session_id)
+            if self._storage:
+                # 只保存最近 N 轮消息 + 摘要，节省存储空间
+                messages_to_save = session.agent.messages
+                await self._storage.save(
+                    session_id=session.session_id,
+                    summary=session.summary,
+                    messages=messages_to_save,
+                )
+                logger.debug("会话 %s 已持久化 (%d 条消息)", session.session_id, len(messages_to_save))
         except Exception as e:
             logger.error("会话持久化失败: %s", e)
+
+    async def get_ui_messages(self, session_id: str) -> list:
+        """获取前端显示用的聊天记录"""
+        if not self._storage:
+            return []
+        try:
+            return await self._storage.load_ui_messages(session_id)
+        except Exception as e:
+            logger.warning("读取 UI 消息失败: %s", e)
+            return []
+
+    async def save_ui_messages(self, session_id: str, ui_messages: list):
+        """保存前端显示用的聊天记录"""
+        if not self._storage:
+            return
+        try:
+            await self._storage.save_ui_messages(session_id, ui_messages)
+        except Exception as e:
+            logger.warning("保存 UI 消息失败: %s", e)
 
     def remove_session(self, session_id: str):
         """清理会话（用户主动退出或超时）"""

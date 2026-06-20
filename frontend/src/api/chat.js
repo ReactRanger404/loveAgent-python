@@ -17,3 +17,35 @@ export function doChat(message, signal, sessionId = '') {
 }
 
 export { doChat as doChatWithManus }
+
+/**
+ * 从后端加载聊天历史记录（替代 localStorage）
+ * @param {string} sessionId
+ * @returns {Promise<Array>}
+ */
+export async function fetchHistory(sessionId) {
+  if (!sessionId) return []
+  try {
+    const res = await fetch(`${BASE_URL}/chat/history?session_id=${encodeURIComponent(sessionId)}`)
+    if (!res.ok) return []
+    return await res.json()
+  } catch {
+    return []
+  }
+}
+
+/**
+ * 保存聊天历史记录到后端
+ * @param {string} sessionId
+ * @param {Array} messages
+ */
+export async function saveHistory(sessionId, messages) {
+  if (!sessionId) return
+  try {
+    await fetch(`${BASE_URL}/chat/history?session_id=${encodeURIComponent(sessionId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages }),
+    })
+  } catch {}
+}

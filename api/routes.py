@@ -11,7 +11,7 @@ import os
 import logging
 from urllib.parse import quote
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import Response
 from sse_starlette.sse import EventSourceResponse
 
@@ -44,8 +44,8 @@ def create_router(all_tools=None, llm=None):
                 yield {"event": "done", "data": ""}
                 return
 
-            # ① 获取/创建会话（复用 agent 实例）
-            session = session_manager.get_or_create(session_id, all_tools, llm)
+            # ① 获取/创建会话（复用 agent 实例，从 DB 恢复）
+            session = await session_manager.get_or_create(session_id, all_tools, llm)
 
             # ② 重置状态 + 注入摘要
             agent = session_manager.prepare_agent(session)
@@ -64,6 +64,33 @@ def create_router(all_tools=None, llm=None):
             yield {"event": "done", "data": ""}
 
         return EventSourceResponse(event_generator())
+
+    # ==================== 历史记录（替代前端 localStorage） ====================
+
+    @router.get("/chat/history")
+    async def chat_history(session_id: str = Query(...)):
+        """获取前端显示用的聊天记录"""
+        try:
+            ui_msgs = await session_manager.get_ui_messages(session_id)
+            return Response(
+                content=json.dumps(ui_msgs, ensure_ascii=False),
+                media_type="application/json",
+            )
+        except Exception as e:
+            logger.error("获取历史记录失败: %s", e)
+            return Response(content="[]", media_type="application/json")
+
+    @router.put("/chat/history")
+    async def save_chat_history(request: Request, session_id: str = Query(...)):
+        """保存前端显示用的聊天记录"""
+        try:
+            body = await request.json()
+            ui_msgs = body.get("messages", [])
+            await session_manager.save_ui_messages(session_id, ui_msgs)
+            return Response(content="ok")
+        except Exception as e:
+            logger.error("保存历史记录失败: %s", e)
+            return Response(content="fail", status_code=500)
 
     # ==================== 文件下载 ====================
 
