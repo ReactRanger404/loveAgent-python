@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     # DashScope 配置
     dashscope_api_key: str = "sk-2186104e1f154b90beca9d7037ae1582"
     dashscope_model: str = "qwen-plus"
+    dashscope_fallback_models: list[str] = ["qwen-turbo"]
+    dashscope_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     dashscope_vision_model: str = "qwen-vl-max"
     dashscope_tts_model: str = "sambert-zhiqi-v1"
     dashscope_tts_voice: str = "longanyang"
@@ -20,6 +22,11 @@ class Settings(BaseSettings):
 
     # 高德地图
     amap_maps_api_key: str = "efec48c21522333bc75044afb1716bfd"
+
+    # DeepSeek（备用模型）
+    deepseek_api_key: Optional[str] = None
+    deepseek_model: str = "deepseek-chat"
+    deepseek_base_url: str = "https://api.deepseek.com"
 
     # 服务器
     server_host: str = "0.0.0.0"

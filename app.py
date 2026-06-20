@@ -55,13 +55,40 @@ def create_app() -> FastAPI:
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
                        allow_methods=["*"], allow_headers=["*"], expose_headers=["*"])
 
-    # ========== LLM ==========
-    llm = ChatOpenAI(
+    # ========== LLM（主模型 + 备用模型自动切换） ==========
+    llm_base = ChatOpenAI(
         model=settings.dashscope_model,
         api_key=settings.dashscope_api_key,
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        base_url=settings.dashscope_base_url,
         temperature=0.7,
     )
+
+    # 创建备用模型列表（阿里云 DashScope 备用模型）
+    fallbacks = []
+    for fb_model in settings.dashscope_fallback_models:
+        fallbacks.append(ChatOpenAI(
+            model=fb_model,
+            api_key=settings.dashscope_api_key,
+            base_url=settings.dashscope_base_url,
+            temperature=0.7,
+        ))
+        logger.info("备用模型(阿里云): %s", fb_model)
+
+    # 如果配置了 DeepSeek，也加入备用列表
+    if settings.deepseek_api_key:
+        fallbacks.append(ChatOpenAI(
+            model=settings.deepseek_model,
+            api_key=settings.deepseek_api_key,
+            base_url=settings.deepseek_base_url,
+            temperature=0.7,
+        ))
+        logger.info("备用模型(DeepSeek): %s", settings.deepseek_model)
+
+    if fallbacks:
+        llm = llm_base.with_fallbacks(fallbacks, exceptions_to_handle=(Exception,))
+        logger.info("主模型: %s | 备用数: %d", settings.dashscope_model, len(fallbacks))
+    else:
+        llm = llm_base
 
     # ========== 工具 ==========
     all_tools = get_all_tools(api_key=settings.search_api_key)
