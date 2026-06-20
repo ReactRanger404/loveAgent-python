@@ -49,7 +49,7 @@ def create_router(all_tools=None, llm=None):
             # ② 重置状态 + 注入摘要
             agent = session_manager.prepare_agent(session)
 
-            # ③ 流式运行
+            # ③ 流式运行,async for 异步非阻塞循环
             async for event in agent.run_stream(message):
                 yield {"data": json.dumps(event, ensure_ascii=False)}
 
