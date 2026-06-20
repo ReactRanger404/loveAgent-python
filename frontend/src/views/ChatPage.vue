@@ -19,9 +19,24 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import ChatRoom from '../components/ChatRoom.vue'
 import { parseSseStream } from '../utils/sse.js'
+
+const STORAGE_KEY_PREFIX = 'chat_messages_'
+const SESSION_KEY_PREFIX = 'chat_session_id_'
+
+// 每个浏览器第一次访问时生成唯一标识，后续复用，实现用户隔离
+let userId = ''
+try {
+  userId = localStorage.getItem('_uid')
+  if (!userId) {
+    userId = 'u' + Math.random().toString(36).substring(2, 10)
+    localStorage.setItem('_uid', userId)
+  }
+} catch {}
+const STORAGE_KEY = STORAGE_KEY_PREFIX + userId
+const SESSION_KEY = SESSION_KEY_PREFIX + userId
 
 const props = defineProps({
   title: { type: String, required: true },
@@ -30,9 +45,38 @@ const props = defineProps({
   chatFn: { type: Function, required: true },
 })
 
-const messages = ref([])
+// 从 localStorage 恢复历史消息和会话 ID（带异常保护）
+let initialMessages = []
+try {
+  const saved = localStorage.getItem(STORAGE_KEY)
+  if (saved) initialMessages = JSON.parse(saved)
+} catch (e) {
+  console.warn('读取历史消息失败，已重置:', e)
+  localStorage.removeItem(STORAGE_KEY)
+}
+const messages = ref(initialMessages)
 const loading = ref(false)
-const sessionId = ref('session_' + Math.random().toString(36).substring(2, 10))
+
+const savedSessionId = (() => {
+  try { return localStorage.getItem(SESSION_KEY) } catch { return null }
+})()
+const sessionId = ref(savedSessionId || 'session_' + Math.random().toString(36).substring(2, 10))
+try { localStorage.setItem(SESSION_KEY, sessionId.value) } catch {}
+
+// 消息变化时自动持久化（防抖：仅保存完整消息，不保存流式中间态）
+let saveTimer = null
+watch(messages, () => {
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => {
+    try {
+      // 只保存 user/assistant 的对话记录，跳过 think/tool 中间态
+      const history = messages.value.filter(m => m.role === 'user' || m.role === 'assistant')
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(history))
+    } catch (e) {
+      console.warn('保存历史消息失败:', e)
+    }
+  }, 500)
+}, { deep: true })
 let abortController = null
 
 async function handleSend(text) {
@@ -64,11 +108,8 @@ async function handleSend(text) {
         }
       },
       onThinkClear() {
-        // 仅清空当前步骤的 think 消息（不影响之前步骤的思考过程）
-        if (thinkSectionStart >= 0) {
-          messages.value.splice(thinkSectionStart)
-          thinkSectionStart = -1
-        }
+        // 不再删除思考内容，改为保留可折叠（只重置步骤标记）
+        thinkSectionStart = -1
         aiMsgIndex = -1
       },
       onText(data) {

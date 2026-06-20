@@ -6,10 +6,13 @@
       </div>
 
       <template v-for="(item, idx) in groupedMessages" :key="idx">
-        <!-- 思考过程（流式显示，始终可见） -->
+        <!-- 思考过程（可折叠，点击标题展开/收起） -->
         <div v-if="item.type === 'think-group'" class="think-area">
-          <div class="think-header">🤔 思考过程</div>
-          <div class="think-steps">
+          <div class="think-header" @click="toggleThinkGroup(idx)">
+            <span class="collapse-icon">{{ expandedThinkGroups.has(idx) ? '▼' : '▶' }}</span>
+            🤔 思考过程
+          </div>
+          <div v-show="expandedThinkGroups.has(idx) || (loading && isLastThinkGroup(idx))" class="think-steps">
             <div v-for="(t, ti) in item.steps" :key="ti" class="think-step" :class="t.role">
               <template v-if="t.role === 'think'">💭 {{ t.content }}</template>
               <template v-else-if="t.role === 'tool'"><span class="tool-call">🔧 {{ t.content }}</span></template>
@@ -79,6 +82,14 @@ const inputText = ref('')
 const messageListRef = ref(null)
 const currentAudio = ref(null)
 const playingContent = ref('')
+const expandedThinkGroups = ref(new Set())
+
+function toggleThinkGroup(idx) {
+  const set = new Set(expandedThinkGroups.value)
+  if (set.has(idx)) set.delete(idx)
+  else set.add(idx)
+  expandedThinkGroups.value = set
+}
 
 /** 把 think/tool 合并为思考组，消息和文件单独 */
 const groupedMessages = computed(() => {
@@ -198,6 +209,15 @@ watch(() => props.messages, async () => {
   font-weight: 600;
   color: #888;
   margin-bottom: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.think-header:hover { color: #666; }
+.collapse-icon {
+  display: inline-block;
+  width: 14px;
+  font-size: 0.7rem;
+  transition: transform 0.15s;
 }
 .think-steps {
   display: flex;
