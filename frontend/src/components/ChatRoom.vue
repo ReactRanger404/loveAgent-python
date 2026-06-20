@@ -33,8 +33,11 @@
               </div>
               <button
                 v-if="item.msg.role === 'assistant' && item.msg.content && !loading"
-                class="tts-btn" title="播放语音" @click="playTts(item.msg.content)"
-              >🔊</button>
+                class="tts-btn"
+                :class="{ playing: playingContent === item.msg.content }"
+                :title="playingContent === item.msg.content ? '点击停止' : '播放语音'"
+                @click="playTts(item.msg.content)"
+              >{{ playingContent === item.msg.content ? '⏹' : '🔊' }}</button>
             </div>
           </template>
         </div>
@@ -74,6 +77,8 @@ const emit = defineEmits(['send', 'mic-start'])
 
 const inputText = ref('')
 const messageListRef = ref(null)
+const currentAudio = ref(null)
+const playingContent = ref('')
 
 /** 把 think/tool 合并为思考组，消息和文件单独 */
 const groupedMessages = computed(() => {
@@ -125,9 +130,45 @@ function send() {
 
 function playTts(text) {
   if (!text) return
+
+  // ① 点击正在播放的同一段 → 停止
+  if (playingContent.value === text && currentAudio.value) {
+    currentAudio.value.pause()
+    currentAudio.value = null
+    playingContent.value = ''
+    return
+  }
+
+  // ② 点击不同的内容 → 停止旧的
+  if (currentAudio.value) {
+    currentAudio.value.pause()
+    currentAudio.value = null
+  }
+
+  // ③ 开始新的播放
+  playingContent.value = text
   const encoded = encodeURIComponent(text.slice(0, 500))
   const audio = new Audio(`/api/tts/synthesize?text=${encoded}`)
-  audio.play().catch(() => {})
+  currentAudio.value = audio
+
+  audio.onended = () => {
+    if (currentAudio.value === audio) {
+      playingContent.value = ''
+      currentAudio.value = null
+    }
+  }
+  audio.onerror = () => {
+    if (currentAudio.value === audio) {
+      playingContent.value = ''
+      currentAudio.value = null
+    }
+  }
+  audio.play().catch(() => {
+    if (currentAudio.value === audio) {
+      playingContent.value = ''
+      currentAudio.value = null
+    }
+  })
 }
 
 watch(() => props.messages, async () => {
@@ -210,6 +251,7 @@ watch(() => props.messages, async () => {
   cursor: pointer; font-size: 0.9rem; opacity: 0.6; transition: opacity 0.15s; margin-top: 4px; flex-shrink: 0;
 }
 .tts-btn:hover { opacity: 1; background: #f3f4f6; }
+.tts-btn.playing { opacity: 1; background: #dbeafe; border-color: #6366f1; color: #4f46e5; }
 
 /* ===== 文件下载 ===== */
 .file-download { align-self: center; }

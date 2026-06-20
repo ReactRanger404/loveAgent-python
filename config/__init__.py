@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     dashscope_api_key: str = "sk-2186104e1f154b90beca9d7037ae1582"
     dashscope_model: str = "qwen-plus"
     dashscope_vision_model: str = "qwen-vl-max"
-    dashscope_tts_model: str = "cosyvoice-v3-flash"
+    dashscope_tts_model: str = "sambert-zhiqi-v1"
     dashscope_tts_voice: str = "longanyang"
     dashscope_asr_model: str = "paraformer-realtime-v2"
 

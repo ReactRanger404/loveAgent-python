@@ -2,7 +2,7 @@
 import os
 import logging
 
-from langchain_core.tools import tool
+from langchain_core.tools import (tool)
 from dashscope.audio.tts import SpeechSynthesizer
 from config import settings
 from config.constants import FILE_SAVE_DIR
@@ -30,8 +30,13 @@ def text_to_speech(text: str, file_name: str = "output.wav") -> str:
             api_key=settings.dashscope_api_key,
         )
 
-        if result.status_code != 200:
-            return f"语音合成失败: {result.message}"
+        resp = result.get_response()
+        if resp.status_code != 200:
+            return f"语音合成失败: {getattr(resp, 'message', str(resp))}"
+
+        audio_bytes = result.get_audio_data()
+        if not audio_bytes:
+            return "语音合成失败: 未生成音频数据"
 
         # 保存为文件
         output_dir = os.path.join(FILE_SAVE_DIR, "audio")
@@ -39,7 +44,7 @@ def text_to_speech(text: str, file_name: str = "output.wav") -> str:
         output_path = os.path.join(output_dir, file_name)
 
         with open(output_path, "wb") as f:
-            f.write(result.output_audio)
+            f.write(audio_bytes)
 
         return f"语音合成成功，文件: {output_path}"
     except Exception as e:
