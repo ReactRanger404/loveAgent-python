@@ -30,6 +30,7 @@
             <div class="bubble-wrapper">
               <div class="bubble">
                 <span v-if="item.msg.content">{{ item.msg.content }}</span>
+                <img v-if="item.msg.imgSrc" :src="item.msg.imgSrc" class="msg-img" />
                 <span v-else-if="loading && item.msg.role === 'assistant' && idx === lastAssistantIdx" class="typing">
                   <i></i><i></i><i></i>
                 </span>
@@ -56,9 +57,17 @@
 
     <div class="input-area">
       <button v-if="showMic" class="mic-btn" :disabled="loading" title="语音输入" @click="$emit('mic-start')">🎤</button>
-      <textarea v-model="inputText" :placeholder="placeholder" :disabled="loading" rows="1"
-        @keydown.enter.exact.prevent="send" />
-      <button class="send-btn" :disabled="loading || !inputText.trim()" @click="send">
+      <button class="img-btn" :disabled="loading" title="上传图片" @click="$refs.imgInput.click()">📷</button>
+      <input ref="imgInput" type="file" accept="image/*" style="display:none" @change="onImageSelect" />
+      <div class="input-wrap">
+        <div v-if="pendingImage" class="image-preview">
+          <img :src="'data:image/jpeg;base64,'+pendingImage" />
+          <button class="img-remove" @click="$emit('clear-image')">×</button>
+        </div>
+        <textarea v-model="inputText" :placeholder="placeholder" :disabled="loading" rows="1"
+          @keydown.enter.exact.prevent="send" />
+      </div>
+      <button class="send-btn" :disabled="loading || (!inputText.trim() && !pendingImage)" @click="send">
         {{ loading ? '思考中...' : '发送' }}
       </button>
     </div>
@@ -74,9 +83,10 @@ const props = defineProps({
   placeholder: { type: String, default: '输入消息...' },
   emptyText: { type: String, default: '开始对话吧，AI 随时为你服务' },
   showMic: { type: Boolean, default: false },
+  pendingImage: { type: String, default: '' },
 })
 
-const emit = defineEmits(['send', 'mic-start'])
+const emit = defineEmits(['send', 'mic-start', 'select-image', 'clear-image'])
 
 const inputText = ref('')
 const messageListRef = ref(null)
@@ -134,7 +144,7 @@ const lastAssistantIdx = computed(() => {
 
 function send() {
   const text = inputText.value.trim()
-  if (!text || props.loading) return
+  if ((!text && !props.pendingImage) || props.loading) return
   emit('send', text)
   inputText.value = ''
 }
@@ -180,6 +190,12 @@ function playTts(text) {
       currentAudio.value = null
     }
   })
+}
+
+function onImageSelect(e) {
+  const file = e.target.files?.[0]
+  if (file) emit('select-image', file)
+  e.target.value = ''
 }
 
 watch(() => props.messages, async () => {
@@ -308,4 +324,22 @@ watch(() => props.messages, async () => {
 }
 .send-btn:hover:not(:disabled) { background: #4f46e5; }
 .send-btn:disabled { background: #c7d2fe; cursor: not-allowed; }
+.img-btn {
+  background: none; border: 1px solid #d1d5db; border-radius: 50%; width: 40px; height: 40px;
+  font-size: 1rem; cursor: pointer; flex-shrink: 0; transition: all 0.15s;
+}
+.img-btn:hover:not(:disabled) { background: #eef2ff; border-color: #6366f1; }
+.img-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.input-wrap { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.image-preview {
+  position: relative; display: inline-block; align-self: flex-start;
+  border: 1px solid #d1d5db; border-radius: 8px; overflow: hidden; max-width: 120px;
+}
+.image-preview img { display: block; width: 100%; height: auto; max-height: 80px; object-fit: cover; }
+.img-remove {
+  position: absolute; top: -4px; right: -4px; width: 18px; height: 18px;
+  background: #ef4444; color: #fff; border: none; border-radius: 50%;
+  font-size: 12px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.msg-img { max-width: 200px; max-height: 200px; border-radius: 8px; margin-top: 6px; display: block; }
 </style>

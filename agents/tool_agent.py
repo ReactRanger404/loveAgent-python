@@ -61,6 +61,8 @@ class ToolAgent(ReactAgent):
         for msg in self.messages:
             if msg["role"] == "user":
                 lc_messages.append(HumanMessage(content=msg["content"]))
+            elif msg["role"] == "user_multimodal":
+                lc_messages.append(msg["content"])
             elif msg["role"] == "assistant":
                 lc_messages.append(AIMessage(content=msg.get("content", "")))
             elif msg["role"] == "tool":
@@ -204,7 +206,10 @@ class ToolAgent(ReactAgent):
             return
 
         self.state = AgentState.RUNNING
-        self.messages.append({"role": "user", "content": user_prompt})
+        # 检查是否已有用户消息（多模态消息已在 routes.py 中添加）
+        has_user_msg = any(m["role"] in ("user", "user_multimodal") for m in self.messages)
+        if not has_user_msg:
+            self.messages.append({"role": "user", "content": user_prompt})
 
         try:
             for i in range(self.max_steps):

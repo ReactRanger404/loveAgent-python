@@ -1,17 +1,28 @@
 const BASE_URL = '/api'
 
 /**
- * 通过 SSE 调用领域智能体接口（支持会话记忆）
+ * 通过 SSE 调用领域智能体接口（支持会话记忆 + 图片识别）
  * @param {string} message 用户消息
  * @param {AbortSignal} signal 取消信号
- * @param {string} sessionId 会话 ID，用于恢复历史
+ * @param {string} sessionId 会话 ID
+ * @param {string} [image] 可选，base64 图片数据
  */
-export function doChat(message, signal, sessionId = '') {
-  const params = new URLSearchParams({ message })
-  if (sessionId) params.set('session_id', sessionId)
-  return fetch(`${BASE_URL}/chat?${params}`, {
-    method: 'GET',
-    headers: { Accept: 'text/event-stream' },
+export function doChat(message, signal, sessionId = '', image = '') {
+  const body = { message, session_id: sessionId }
+  if (image) body.image = image
+  return fetch(`${BASE_URL}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    body: JSON.stringify(body),
+    signal
+  })
+}
+
+export function doChatVision(message, signal, sessionId, image) {
+  return fetch(`${BASE_URL}/chat/vision`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    body: JSON.stringify({ message, session_id: sessionId, image }),
     signal
   })
 }

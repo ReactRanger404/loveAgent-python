@@ -31,12 +31,21 @@ def create_router(all_tools=None, llm=None):
 
     # ==================== 领域智能体 ====================
 
-    @router.get("/chat")
-    async def domain_chat(message: str = Query(...), session_id: str = Query(default="")):
-        """SSE 流式调用领域智能体，支持会话记忆"""
+    @router.post("/chat")
+    async def domain_chat(request: Request):
+        """SSE 流式调用领域智能体，支持会话记忆 + 图片识别"""
+        body = await request.json()
+        message = body.get("message", "")
+        session_id = body.get("session_id", "")
+        image_base64 = body.get("image", "")
+
         async def event_generator():
             if not all_tools or not llm:
                 yield {"event": "error", "data": "智能体未初始化"}
+                yield {"event": "done", "data": ""}
+                return
+            if not message:
+                yield {"event": "error", "data": "缺少消息"}
                 yield {"event": "done", "data": ""}
                 return
             if not session_id:
@@ -44,28 +53,101 @@ def create_router(all_tools=None, llm=None):
                 yield {"event": "done", "data": ""}
                 return
 
-            # ① 获取/创建会话（复用 agent 实例，从 DB 恢复）
+            # ① 获取/创建会话
             session = await session_manager.get_or_create(session_id, all_tools, llm)
-
-            # ② 重置状态 + 注入摘要
             agent = session_manager.prepare_agent(session)
 
-            # ③ 流式运行,async for 异步非阻塞循环
-            async for event in agent.run_stream(message):
-                yield {"data": json.dumps(event, ensure_ascii=False)}
+            # 带了图片 → 切换到视觉模型
+            if image_base64:
+                from langchain_core.messages import HumanMessage
+                from langchain_openai import ChatOpenAI
+                user_message = HumanMessage(content=[
+                    {"type": "text", "text": message},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}},
+                ])
+                agent.messages.append({"role": "user_multimodal", "content": user_message})
+                # 临时切换到视觉模型
+                original_llm = agent._llm
+                agent._llm = ChatOpenAI(
+                    model=settings.dashscope_vision_model,
+                    api_key=settings.dashscope_api_key,
+                    base_url=settings.dashscope_base_url,
+                    temperature=0.7,
+                )
+            else:
+                agent.messages.append({"role": "user", "content": message})
 
-            # ④ 滑动窗口裁剪（旧轮次移除 + 后台生成摘要）
+            # ② 流式运行（用完恢复原模型）
+            original_llm = getattr(agent, '_llm', None)
+            try:
+                async for event in agent.run_stream(message):
+                    yield {"data": json.dumps(event, ensure_ascii=False)}
+            finally:
+                if image_base64 and original_llm:
+                    agent._llm = original_llm
+
+            # ③ 滑动窗口 + 持久化
             session_manager.apply_sliding_window(session, llm)
-
-            # ⑤ 异步持久化（不阻塞响应）
             import asyncio
             asyncio.create_task(session_manager.background_save(session))
-
             yield {"event": "done", "data": ""}
 
         return EventSourceResponse(event_generator())
 
-    # ==================== 历史记录（替代前端 localStorage） ====================
+    # ==================== 图片识别（视觉描述 → 主模型综合回答） ====================
+
+    @router.post("/chat/vision")
+    async def vision_chat(request: Request):
+        """图片识别：视觉模型先描述 → 主模型+工具基于描述给出完整回答"""
+        body = await request.json()
+        message = body.get("message", "")
+        session_id = body.get("session_id", "")
+        image_base64 = body.get("image", "")
+
+        if not image_base64 or not session_id:
+            return Response(content="缺少图片或 session_id", status_code=400)
+
+        from langchain_openai import ChatOpenAI
+        from langchain_core.messages import HumanMessage
+
+        # ① 视觉模型描述图片
+        vision_llm = ChatOpenAI(
+            model=settings.dashscope_vision_model,
+            api_key=settings.dashscope_api_key,
+            base_url=settings.dashscope_base_url,
+            temperature=0.7,
+        )
+        vision_prompt = message or "请用中文详细描述这张图片的内容"
+        vision_msg = HumanMessage(content=[
+            {"type": "text", "text": vision_prompt},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}},
+        ])
+        description = (await vision_llm.ainvoke([vision_msg])).content or ""
+
+        # ② 把图片描述注入主模型
+        enriched_message = f"{message}\n\n【用户上传的图片描述】\n{description}"
+
+        async def event_generator():
+            if not all_tools or not llm:
+                yield {"data": json.dumps({"type": "error", "content": "智能体未初始化"}, ensure_ascii=False)}
+                yield {"data": json.dumps({"type": "done", "content": ""}, ensure_ascii=False)}
+                return
+
+            session = await session_manager.get_or_create(session_id, all_tools, llm)
+            agent = session_manager.prepare_agent(session)
+            agent.messages.append({"role": "user", "content": enriched_message})
+
+            async for event in agent.run_stream(enriched_message):
+                yield {"data": json.dumps(event, ensure_ascii=False)}
+
+            session_manager.apply_sliding_window(session, llm)
+            import asyncio
+            asyncio.create_task(session_manager.background_save(session))
+            yield {"data": json.dumps({"type": "done", "content": ""}, ensure_ascii=False)}
+
+        return EventSourceResponse(event_generator())
+
+    # ==================== 历史记录 ====================
 
     @router.get("/chat/history")
     async def chat_history(session_id: str = Query(...)):

@@ -34,8 +34,11 @@
       :loading="loading"
       :placeholder="placeholder"
       :show-mic="showMic"
+      :pending-image="pendingImage"
       @send="handleSend"
       @mic-start="handleMicStart"
+      @select-image="selectImage"
+      @clear-image="clearImage"
     />
   </div>
 </template>
@@ -44,7 +47,7 @@
 import { ref } from 'vue'
 import ChatRoom from '../components/ChatRoom.vue'
 import { parseSseStream } from '../utils/sse.js'
-import { fetchHistory, saveHistory, deleteHistoryBackend } from '../api/chat.js'
+import { fetchHistory, saveHistory, deleteHistoryBackend, doChatVision } from '../api/chat.js'
 
 // 浏览器唯一标识（仅存在 localStorage，无聊天内容）
 let userId = ''
@@ -142,8 +145,31 @@ async function switchToSession(id) {
 // ====== 消息状态 ======
 const messages = ref([])
 const loading = ref(false)
+const pendingImage = ref('')
 
-// 组件挂载时从后端加载当前会话历史
+// 图片选择：压缩后转为 base64
+function selectImage(file) {
+  if (!file || loading.value) return
+  const img = new Image()
+  img.onload = () => {
+    const canvas = document.createElement('canvas')
+    let w = img.width, h = img.height
+    const maxSize = 800
+    if (w > maxSize || h > maxSize) {
+      if (w > h) { h = h / w * maxSize; w = maxSize }
+      else { w = w / h * maxSize; h = maxSize }
+    }
+    canvas.width = w; canvas.height = h
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(img, 0, 0, w, h)
+    pendingImage.value = canvas.toDataURL('image/jpeg', 0.8).split(',')[1]
+  }
+  img.src = URL.createObjectURL(file)
+}
+
+function clearImage() { pendingImage.value = '' }
+
+// 组件挂载时从后端加载历史
 fetchHistory(sessionId.value).then(msgs => {
   if (msgs.length) messages.value = msgs
 })
@@ -151,19 +177,58 @@ fetchHistory(sessionId.value).then(msgs => {
 let abortController = null
 
 async function handleSend(text) {
-  if (!text.trim() || loading.value) return
+  if ((!text.trim() && !pendingImage.value) || loading.value) return
 
-  messages.value.push({ role: 'user', content: text })
+  const displayText = text.trim() || '[图片]'
+  const msg = { role: 'user', content: displayText }
+  if (pendingImage.value) msg.imgSrc = `data:image/jpeg;base64,${pendingImage.value}`
+  messages.value.push(msg)
   loading.value = true
 
   if (abortController) abortController.abort()
   abortController = new AbortController()
 
   try {
-    const response = await props.chatFn(text, abortController.signal, sessionId.value)
-
-    let aiMsgIndex = -1
-    let thinkSectionStart = -1  // 跟踪当前步骤的 think 消息起始位置
+    if (pendingImage.value) {
+      // 有图片 → 视觉模型描述 → 主模型+工具综合回答
+      const response = await doChatVision(text, abortController.signal, sessionId.value, pendingImage.value)
+      pendingImage.value = ''
+      let aiMsgIndex = -1
+      let thinkSectionStart = -1
+      await parseSseStream(response, {
+        onThink(data) {
+          if (thinkSectionStart < 0) {
+            thinkSectionStart = messages.value.length
+            messages.value.push({ role: 'think', content: data })
+          } else {
+            const m = messages.value[thinkSectionStart]
+            if (m && m.role === 'think') m.content += data
+          }
+        },
+        onThinkClear() { thinkSectionStart = -1; aiMsgIndex = -1 },
+        onText(data) {
+          thinkSectionStart = -1
+          if (aiMsgIndex < 0) {
+            messages.value.push({ role: 'assistant', content: data })
+            aiMsgIndex = messages.value.length - 1
+          } else {
+            messages.value[aiMsgIndex].content += data
+          }
+        },
+        onTool(data) {
+          thinkSectionStart = -1
+          messages.value.push({ role: 'tool', content: data })
+        },
+        onError(data) {
+          thinkSectionStart = -1
+          messages.value.push({ role: 'assistant', content: `错误: ${data}` })
+        },
+      })
+    } else {
+      // 纯文字 → 走正常智能体接口
+      const response = await props.chatFn(text, abortController.signal, sessionId.value, '')
+      let aiMsgIndex = -1
+      let thinkSectionStart = -1  // 跟踪当前步骤的 think 消息起始位置
 
     await parseSseStream(response, {
       onThink(data) {
@@ -205,6 +270,7 @@ async function handleSend(text) {
         messages.value.push({ role: 'assistant', content: `错误: ${data}` })
       },
     })
+  }
   } catch (err) {
     if (err.name === 'AbortError') return
     messages.value.push({ role: 'assistant', content: `请求出错: ${err.message || '未知错误'}` })
