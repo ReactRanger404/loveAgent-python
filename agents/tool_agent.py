@@ -259,12 +259,34 @@ class ToolAgent(ReactAgent):
                     for ev in events:
                         yield ev
                 else:
-                    # 无工具调用 → 流式输出的文本是"最终回答"
+                    # 无工具调用 → 流式输出的文本是"思考过程"
                     self.messages.append({"role": "assistant", "content": full_content})
-                    # ① 清空 think 区（刚输出的文本其实是答案，不应留在 think 区）
+                    # ① 清空 think 区
                     yield {"type": "think_clear", "content": "clear"}
-                    # ② 最终回答一次性输出（非流式）
-                    yield {"type": "text", "content": full_content}
+
+                    # ② 根据思考过程重新生成精炼的最终回答
+                    try:
+                        refine_prompt = (
+                            "你是一个面向用户的AI助手。请根据以下你的思考过程，\n"
+                            "生成一个简洁、结构清晰、用户友好的最终回答。\n"
+                            "去掉推理过程中的中间步骤和规划，直接给出答案。\n"
+                            "用与用户相同的语言回复。\n\n"
+                            "思考过程：\n"
+                            f"{full_content}"
+                        )
+                        final_text = ""
+                        async for chunk in self._llm.astream([HumanMessage(content=refine_prompt)]):
+                            text_chunk = chunk.content or ""
+                            if text_chunk:
+                                final_text += text_chunk
+                                yield {"type": "text", "content": text_chunk}
+                    except Exception as e:
+                        logger.warning("最终回答生成失败，回退到思考过程: %s", e)
+                        final_text = full_content
+                        yield {"type": "text", "content": final_text}
+
+                    # ③ 最终回答存入消息历史
+                    self.messages.append({"role": "assistant", "content": final_text})
                     break
 
             if self.current_step >= self.max_steps:
