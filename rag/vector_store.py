@@ -7,7 +7,7 @@ from langchain_core.embeddings import Embeddings
 from langchain_core.documents import Document
 from langchain_core.vectorstores import VectorStore
 
-from rag.document_loader import DocumentLoader
+from rag.document_loader import DocumentLoader, PDFLoader
 from rag.keyword_enricher import KeywordEnricher
 from rag.text_splitter import TextSplitter
 
@@ -46,12 +46,20 @@ class VectorStoreManager:
         except Exception:
             pass
 
-        # 首次初始化：加载文档、切分、增强、存入 ChromaDB
+        # 首次初始化：加载文档（md + pdf）、切分、增强、存入 ChromaDB
         loader = DocumentLoader()
         documents = loader.load_documents()
 
+        pdf_loader = PDFLoader()
+        pdf_docs = pdf_loader.load_documents(describe_images=True)
+
         splitter = TextSplitter()
         split_docs = splitter.split_customized(documents)
+
+        if pdf_docs:
+            pdf_chunks = splitter.split_pdf_documents(pdf_docs)
+            split_docs.extend(pdf_chunks)
+            logger.info("合并 PDF 知识库: %d 个 chunk", len(pdf_chunks))
 
         if self._llm:
             enricher = KeywordEnricher(self._llm)
