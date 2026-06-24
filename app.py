@@ -105,8 +105,9 @@ def create_app() -> FastAPI:
         retriever = vs_mgr.as_retriever(search_kwargs={"k": 3})
         retriever_holder["instance"] = retriever
 
-        from tools.rag_query import set_retriever
+        from tools.rag_query import set_retriever, set_llm
         set_retriever(retriever)
+        set_llm(llm)
         logger.info("RAG 知识库加载成功")
     except Exception as e:
         logger.warning("RAG 知识库加载失败（不影响基本功能）: %s", e)

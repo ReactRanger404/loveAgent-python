@@ -1,12 +1,16 @@
 """RAG 知识库查询工具 - 供智能体调用"""
 import logging
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import tool
+
+from rag.query_rewriter import QueryRewriter
 
 logger = logging.getLogger(__name__)
 
 # 将在 app.py 初始化时设置
 _retriever = None
+_llm: BaseChatModel | None = None
 
 
 def set_retriever(retriever):
@@ -14,6 +18,13 @@ def set_retriever(retriever):
     global _retriever
     _retriever = retriever
     logger.info("RAG 检索器已注入工具")
+
+
+def set_llm(llm: BaseChatModel):
+    """设置 LLM（用于查询重写，由 app.py 初始化时调用）"""
+    global _llm
+    _llm = llm
+    logger.info("RAG 查询重写 LLM 已注入工具")
 
 
 @tool
@@ -28,7 +39,14 @@ def rag_query(query: str) -> str:
         return "知识库未初始化"
 
     try:
-        docs = _retriever.invoke(query)
+        # 查询重写：口语→专业，提升检索命中率
+        if _llm is not None:
+            rewritten = QueryRewriter(_llm).rewrite(query)
+            logger.info("查询重写: %s -> %s", query, rewritten)
+        else:
+            rewritten = query
+
+        docs = _retriever.invoke(rewritten)
         if not docs:
             return "知识库中未找到相关信息"
 
